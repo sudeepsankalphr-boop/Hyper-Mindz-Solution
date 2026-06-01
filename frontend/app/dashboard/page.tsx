@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-const API = 'http://localhost:8001';
+const API = 'https://hyper-mindz-solution-production.up.railway.app';
 const COLORS = ['#00d4aa', '#0066ff', '#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff'];
 
 function getToken() { return localStorage.getItem('token'); }
