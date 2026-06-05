@@ -39,23 +39,51 @@ def get_csv_schema(csv_data: str) -> str:
         return ""
     return lines[0]
 
-def build_prompt(schema: str, question: str, sample_rows: str) -> str:
+def infer_column_types(csv_data: str) -> dict:
+    """Infer numeric vs text columns from sample data"""
+    lines = csv_data.strip().split('\n')
+    if len(lines) < 2:
+        return {}
+    
+    headers = lines[0].split(',')
+    first_row = lines[1].split(',')
+    
+    col_types = {}
+    for col, val in zip(headers, first_row):
+        col = col.strip()
+        try:
+            float(val.strip())
+            col_types[col] = "REAL"
+        except ValueError:
+            col_types[col] = "TEXT"
+    
+    return col_types
+
+def build_prompt(schema: str, question: str, sample_rows: str, col_types: dict) -> str:
+    numeric_cols = [col for col, dtype in col_types.items() if dtype == "REAL"]
+    
     return f"""You are a SQL expert. Generate a SQLite SELECT query for this question.
 
 CSV Schema (columns):
 {schema}
+
+Numeric columns (use CAST or direct arithmetic): {', '.join(numeric_cols) if numeric_cols else 'None'}
 
 Sample data (first 3 rows):
 {sample_rows}
 
 Question: {question}
 
-Rules:
-1. Generate ONLY the SELECT statement
-2. No explanations, no markdown, no backticks
-3. Use standard SQLite syntax
-4. Column names must match exactly
-5. Table name is always: data
+IMPORTANT RULES:
+1. Generate ONLY the SELECT statement (no markdown, no backticks, no explanation)
+2. Use standard SQLite syntax
+3. Column names must match exactly (case-sensitive)
+4. Table name is always: data
+5. For filtering/sorting on numeric columns, use CAST: CAST(column_name AS REAL)
+6. For aggregations (SUM, AVG, COUNT, MAX, MIN), use GROUP BY with matching column names
+7. Example: SELECT category, CAST(SUM(CAST(revenue AS REAL)) AS INTEGER) AS total_revenue FROM data GROUP BY category ORDER BY total_revenue DESC
+8. For TOP N results, use LIMIT clause
+9. For numeric comparisons: CAST(column AS REAL) > 500, not column > 500
 
 Return ONLY the SQL query, nothing else."""
 
@@ -68,7 +96,7 @@ def validate_sql(sql: str) -> bool:
         return False
     return True
 
-def execute_query(csv_data: str, sql: str) -> dict:
+def execute_query(csv_data: str, sql: str, col_types: dict) -> dict:
     import sqlite3
     import io
     import csv
@@ -83,8 +111,14 @@ def execute_query(csv_data: str, sql: str) -> dict:
         raise Exception("No data")
 
     cols = list(rows[0].keys())
-    col_defs = ', '.join([f'"{c}" TEXT' for c in cols])
-    cursor.execute(f"CREATE TABLE data ({col_defs})")
+    
+    # Create table with inferred types
+    col_defs = []
+    for col in cols:
+        dtype = col_types.get(col.strip(), "TEXT")
+        col_defs.append(f'"{col}" {dtype}')
+    
+    cursor.execute(f"CREATE TABLE data ({', '.join(col_defs)})")
 
     placeholders = ', '.join(['?' for _ in cols])
     for row in rows:
@@ -122,9 +156,10 @@ def ask_question(
         raise HTTPException(status_code=404, detail="File not found")
 
     schema = get_csv_schema(file.csv_data)
+    col_types = infer_column_types(file.csv_data)
     sample_lines = file.csv_data.split('\n')[:4]
     sample_rows = '\n'.join(sample_lines)
-    prompt = build_prompt(schema, request.question, sample_rows)
+    prompt = build_prompt(schema, request.question, sample_rows, col_types)
 
     try:
         response = client.chat.completions.create(
@@ -140,7 +175,7 @@ def ask_question(
         if not validate_sql(generated_sql):
             raise HTTPException(status_code=400, detail="Generated SQL contains unsafe operations")
 
-        result = execute_query(file.csv_data, generated_sql)
+        result = execute_query(file.csv_data, generated_sql, col_types)
 
         history = QueryHistory(
             user_id=user.id,
