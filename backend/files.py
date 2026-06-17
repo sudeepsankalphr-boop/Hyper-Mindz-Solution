@@ -2,15 +2,12 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Header
 from sqlalchemy.orm import Session
 import csv
 import io
+import jwt
 from database import get_db
 from models import UploadedFile, User
-import jwt
-import os
+from config import JWT_SECRET, ALGORITHM
 
 router = APIRouter(prefix="/files", tags=["files"])
-
-JWT_SECRET = os.getenv("JWT_SECRET", "test-secret-key")
-ALGORITHM = "HS256"
 
 def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
     if not authorization:
@@ -23,7 +20,7 @@ def get_current_user(authorization: str = Header(None), db: Session = Depends(ge
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
         return user
-    except:
+    except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 @router.post("/upload")

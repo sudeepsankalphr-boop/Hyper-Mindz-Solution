@@ -3,15 +3,14 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from database import get_db
 from models import User, UploadedFile, QueryHistory
+from config import JWT_SECRET, ALGORITHM
 import jwt
 import os
 import json
+import time
 from groq import Groq
 
 router = APIRouter(prefix="/query", tags=["query"])
-
-JWT_SECRET = os.getenv("JWT_SECRET", "test-secret-key")
-ALGORITHM = "HS256"
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
@@ -19,6 +18,7 @@ class QueryRequest(BaseModel):
     file_id: str
     question: str
 
+# Single shared get_current_user (removed duplicate from files.py)
 def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
     if not authorization:
         raise HTTPException(status_code=401, detail="No token")
@@ -30,7 +30,7 @@ def get_current_user(authorization: str = Header(None), db: Session = Depends(ge
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
         return user
-    except:
+    except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 def get_csv_schema(csv_data: str) -> str:
@@ -40,7 +40,6 @@ def get_csv_schema(csv_data: str) -> str:
     return lines[0]
 
 def infer_column_types(csv_data: str) -> dict:
-    """Infer numeric vs text columns from sample data"""
     lines = csv_data.strip().split('\n')
     if len(lines) < 2:
         return {}
@@ -61,12 +60,14 @@ def infer_column_types(csv_data: str) -> dict:
 
 def build_prompt(schema: str, question: str, sample_rows: str, col_types: dict) -> str:
     numeric_cols = [col for col, dtype in col_types.items() if dtype == "REAL"]
+    all_cols = list(col_types.keys())
     
     return f"""You are a SQL expert. Generate a SQLite SELECT query for this question.
 
 CSV Schema (columns):
 {schema}
 
+All available columns: {', '.join(all_cols)}
 Numeric columns (use CAST or direct arithmetic): {', '.join(numeric_cols) if numeric_cols else 'None'}
 
 Sample data (first 3 rows):
@@ -75,26 +76,73 @@ Sample data (first 3 rows):
 Question: {question}
 
 IMPORTANT RULES:
-1. Generate ONLY the SELECT statement (no markdown, no backticks, no explanation)
-2. Use standard SQLite syntax
-3. Column names must match exactly (case-sensitive)
-4. Table name is always: data
-5. For filtering/sorting on numeric columns, use CAST: CAST(column_name AS REAL)
-6. For aggregations (SUM, AVG, COUNT, MAX, MIN), use GROUP BY with matching column names
-7. Example: SELECT category, CAST(SUM(CAST(revenue AS REAL)) AS INTEGER) AS total_revenue FROM data GROUP BY category ORDER BY total_revenue DESC
-8. For TOP N results, use LIMIT clause
-9. For numeric comparisons: CAST(column AS REAL) > 500, not column > 500
+1. If the question cannot be answered from the available columns above, respond with exactly:
+   CANNOT_ANSWER: <brief reason>
+   Do NOT invent SQL for questions that don't map to the schema.
+2. If the question is not about this dataset (e.g. general knowledge, geography, trivia), respond with exactly:
+   CANNOT_ANSWER: This question is not about the uploaded data.
+3. Generate ONLY the SELECT statement (no markdown, no backticks, no explanation)
+4. Use standard SQLite syntax
+5. Column names must match exactly (case-sensitive)
+6. Table name is always: data
+7. For filtering/sorting on numeric columns, use CAST: CAST(column_name AS REAL)
+8. For TOP N within groups, use window functions:
+   Example: SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY region ORDER BY CAST(revenue AS REAL) DESC) AS rn FROM data) WHERE rn = 1
+9. For running totals: SUM(CAST(amount AS REAL)) OVER (ORDER BY date_col)
+10. For period-over-period: use LAG(value) OVER (ORDER BY date_col)
+11. For TOP N results globally, use LIMIT clause
+12. For numeric comparisons: CAST(column AS REAL) > 500
 
-Return ONLY the SQL query, nothing else."""
+Return ONLY the SQL query or CANNOT_ANSWER: reason. Nothing else."""
 
-def validate_sql(sql: str) -> bool:
-    dangerous = ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'CREATE']
+def validate_sql(sql: str) -> tuple[bool, str]:
+    """
+    Allowlist approach: only permit single SELECT statements.
+    Returns (is_valid, reason).
+    """
+    sql_upper = sql.strip().upper()
+    
+    # Must start with SELECT
+    if not sql_upper.startswith("SELECT"):
+        return False, "Only SELECT queries are permitted"
+    
+    # Block any statement-terminating patterns that could chain queries
+    dangerous = [
+        "DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "CREATE",
+        "TRUNCATE", "ATTACH", "PRAGMA", "REPLACE", "VACUUM",
+        "DETACH", "REINDEX", "ANALYZE"
+    ]
+    
+    import re
+    # Check as whole words only (avoids false positives on column names like created_at, updated_date)
     for keyword in dangerous:
-        if keyword in sql.upper():
-            return False
-    if 'SELECT' not in sql.upper():
-        return False
-    return True
+        if re.search(rf'\b{keyword}\b', sql_upper):
+            return False, f"Query contains disallowed operation: {keyword}"
+    
+    # Block stacked statements
+    if ";" in sql.rstrip(";"):
+        return False, "Multiple statements are not permitted"
+    
+    return True, ""
+
+def call_groq_with_retry(prompt: str, max_retries: int = 2) -> str:
+    """Call Groq with timeout and bounded retry on failure."""
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1024,
+                temperature=0,
+                timeout=30,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries:
+                time.sleep(1.5 * (attempt + 1))  # backoff: 1.5s, 3s
+    raise RuntimeError(f"LLM unavailable after {max_retries + 1} attempts: {last_error}")
 
 def execute_query(csv_data: str, sql: str, col_types: dict) -> dict:
     import sqlite3
@@ -102,6 +150,10 @@ def execute_query(csv_data: str, sql: str, col_types: dict) -> dict:
     import csv
 
     conn = sqlite3.connect(':memory:')
+    
+    # Enforce read-only at execution level
+    conn.execute("PRAGMA query_only = ON")
+    
     cursor = conn.cursor()
 
     reader = csv.DictReader(io.StringIO(csv_data))
@@ -112,12 +164,13 @@ def execute_query(csv_data: str, sql: str, col_types: dict) -> dict:
 
     cols = list(rows[0].keys())
     
-    # Create table with inferred types
     col_defs = []
     for col in cols:
         dtype = col_types.get(col.strip(), "TEXT")
         col_defs.append(f'"{col}" {dtype}')
     
+    # Temporarily disable query_only to load data
+    conn.execute("PRAGMA query_only = OFF")
     cursor.execute(f"CREATE TABLE data ({', '.join(col_defs)})")
 
     placeholders = ', '.join(['?' for _ in cols])
@@ -126,6 +179,7 @@ def execute_query(csv_data: str, sql: str, col_types: dict) -> dict:
         cursor.execute(f"INSERT INTO data VALUES ({placeholders})", values)
 
     conn.commit()
+    conn.execute("PRAGMA query_only = ON")
 
     try:
         cursor.execute(sql)
@@ -161,22 +215,34 @@ def ask_question(
     sample_rows = '\n'.join(sample_lines)
     prompt = build_prompt(schema, request.question, sample_rows, col_types)
 
+    # Call LLM with retry
     try:
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=1024,
-            temperature=0,
-        )
+        raw_response = call_groq_with_retry(prompt)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail="AI service temporarily unavailable. Please try again in a moment.")
 
-        generated_sql = response.choices[0].message.content.strip()
-        generated_sql = generated_sql.replace('```sql', '').replace('```', '').strip()
+    generated_sql = raw_response.replace('```sql', '').replace('```', '').strip()
 
-        if not validate_sql(generated_sql):
-            raise HTTPException(status_code=400, detail="Generated SQL contains unsafe operations")
+    # Handle out-of-scope / unanswerable questions
+    if generated_sql.upper().startswith("CANNOT_ANSWER"):
+        reason = generated_sql.split(":", 1)[1].strip() if ":" in generated_sql else "This question cannot be answered from the available data."
+        raise HTTPException(status_code=400, detail=f"Cannot answer: {reason}")
 
+    # Validate SQL (allowlist approach)
+    is_valid, reason = validate_sql(generated_sql)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Query not permitted: {reason}")
+
+    # Execute
+    try:
         result = execute_query(file.csv_data, generated_sql, col_types)
+    except Exception as e:
+        error_msg = str(e)
+        # Don't leak internal DB errors to client
+        raise HTTPException(status_code=400, detail="Query could not be executed. Try rephrasing your question.")
 
+    # Save to history
+    try:
         history = QueryHistory(
             user_id=user.id,
             file_id=request.file_id,
@@ -186,13 +252,12 @@ def ask_question(
         )
         db.add(history)
         db.commit()
+    except Exception:
+        pass  # History failure should not break the response
 
-        return {
-            "question": request.question,
-            "sql": generated_sql,
-            "data": result,
-            "row_count": result["count"]
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+    return {
+        "question": request.question,
+        "sql": generated_sql,
+        "data": result,
+        "row_count": result["count"]
+    }

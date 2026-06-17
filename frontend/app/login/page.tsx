@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-const API = 'https://hyper-mindz-solution-production.up.railway.app';
+const API = process.env.NEXT_PUBLIC_API_URL || 'https://hyper-mindz-solution-production.up.railway.app';
 
 export default function LoginPage() {
   const [isSignup, setIsSignup] = useState(false);

@@ -3,15 +3,12 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import bcrypt
 import jwt
-import os
 from datetime import datetime, timedelta
 from database import get_db
 from models import User
+from config import JWT_SECRET, ALGORITHM
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-JWT_SECRET = os.getenv("JWT_SECRET", "test-secret-key")
-ALGORITHM = "HS256"
 
 class SignupRequest(BaseModel):
     email: str
