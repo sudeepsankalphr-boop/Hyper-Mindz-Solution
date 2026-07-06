@@ -163,6 +163,20 @@ Built using Claude (architecture decisions, code generation, debugging) and Curs
 
 ---
 
+## Scaling to 1M+ Rows
+
+The current architecture has two bottlenecks at large scale:
+
+1. **CSV stored as text in SQLite** — the full file sits in a single `csv_data` column. At 1M rows that's potentially 500MB+ per row. Fix: store files in object storage (S3/Cloudflare R2), keep only metadata in the DB, stream on demand.
+
+2. **In-memory SQLite per query** — every query re-parses and loads the entire CSV into `:memory:`. Fix: replace with **DuckDB** — columnar engine, queries Parquet/CSV files directly without full memory load, handles 1M+ rows in milliseconds with minimal code change.
+
+3. **Result pagination** — return the first N rows with a `has_more` flag instead of dumping the full result to the browser.
+
+The NL-to-SQL pipeline itself (schema introspection, prompt design, SQL generation) needs no changes — it scales independently of row count.
+
+---
+
 ## What I'd Improve With More Time
 
 1. **Conversation context** — follow-up questions referencing previous results
