@@ -1,8 +1,62 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useGoogleLogin } from '@react-oauth/google';
 import { API } from '@/lib/api';
+
+// useGoogleLogin must be called inside GoogleOAuthProvider context.
+// This component is only rendered after the provider mounts.
+function GoogleLoginButton({
+  disabled,
+  setLoading,
+  setError,
+}: {
+  disabled: boolean;
+  setLoading: (v: boolean) => void;
+  setError: (v: string) => void;
+}) {
+  const router = useRouter();
+  const login = useGoogleLogin({
+    onSuccess: async (tokenResponse) => {
+      setLoading(true);
+      setError('');
+      try {
+        const res = await fetch(`${API}/auth/google-login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access_token: tokenResponse.access_token }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Google login failed');
+        localStorage.setItem('token', data.access_token);
+        router.push('/dashboard');
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Google login failed');
+      } finally {
+        setLoading(false);
+      }
+    },
+    onError: () => setError('Google sign-in was cancelled or failed'),
+  });
+
+  return (
+    <button onClick={() => login()} disabled={disabled}
+      style={{
+        width: '100%', padding: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
+        background: '#fff', border: 'none', borderRadius: '8px', color: '#1a1a1a',
+        fontFamily: "'Courier New', monospace", fontSize: '13px', fontWeight: 700,
+        letterSpacing: '1px', cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1,
+      }}>
+      <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+        <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/>
+        <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z" fill="#34A853"/>
+        <path d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z" fill="#FBBC05"/>
+        <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z" fill="#EA4335"/>
+      </svg>
+      CONTINUE WITH GOOGLE
+    </button>
+  );
+}
 
 export default function LoginPage() {
   const [isSignup, setIsSignup] = useState(false);
@@ -10,7 +64,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleReady, setGoogleReady] = useState(false);
   const router = useRouter();
+
+  useEffect(() => { setGoogleReady(true); }, []);
 
   const handleSubmit = async () => {
     if (!email || !password) { setError('Email and password required'); return; }
@@ -34,29 +91,6 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
-
-  const handleGoogleLogin = useGoogleLogin({
-    onSuccess: async (tokenResponse) => {
-      setLoading(true);
-      setError('');
-      try {
-        const res = await fetch(`${API}/auth/google-login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ access_token: tokenResponse.access_token }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Google login failed');
-        localStorage.setItem('token', data.access_token);
-        router.push('/dashboard');
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : 'Google login failed');
-      } finally {
-        setLoading(false);
-      }
-    },
-    onError: () => setError('Google sign-in was cancelled or failed'),
-  });
 
   return (
     <div style={{
@@ -137,21 +171,10 @@ export default function LoginPage() {
             <span style={{ color: '#444', fontSize: '11px', letterSpacing: '1px' }}>OR</span>
             <div style={{ flex: 1, height: '1px', background: '#1e1e2e' }} />
           </div>
-          <button onClick={() => handleGoogleLogin()} disabled={loading}
-            style={{
-              width: '100%', padding: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
-              background: '#fff', border: 'none', borderRadius: '8px', color: '#1a1a1a',
-              fontFamily: 'inherit', fontSize: '13px', fontWeight: 700,
-              letterSpacing: '1px', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1,
-            }}>
-            <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
-              <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/>
-              <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z" fill="#34A853"/>
-              <path d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z" fill="#FBBC05"/>
-              <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z" fill="#EA4335"/>
-            </svg>
-            CONTINUE WITH GOOGLE
-          </button>
+          {googleReady
+            ? <GoogleLoginButton disabled={loading} setLoading={setLoading} setError={setError} />
+            : <button disabled style={{ width: '100%', padding: '13px', background: '#1a1a1a', border: 'none', borderRadius: '8px', color: '#444', fontFamily: 'inherit', fontSize: '13px', fontWeight: 700, letterSpacing: '1px', cursor: 'not-allowed' }}>CONTINUE WITH GOOGLE</button>
+          }
         </div>
         <div style={{ textAlign: 'center', marginTop: '20px', color: '#333', fontSize: '12px' }}>
           HyperMindZ Assignment — NL-to-SQL System
