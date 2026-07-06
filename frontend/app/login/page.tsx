@@ -1,8 +1,9 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useGoogleLogin } from '@react-oauth/google';
 import { API } from '@/lib/api';
+import { useGoogleClientId } from '@/app/providers';
 
 // useGoogleLogin must be called inside GoogleOAuthProvider context.
 // This component is only rendered after the provider mounts.
@@ -64,10 +65,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [googleReady, setGoogleReady] = useState(false);
+  const googleClientId = useGoogleClientId();
   const router = useRouter();
-
-  useEffect(() => { setGoogleReady(true); }, []);
 
   const handleSubmit = async () => {
     if (!email || !password) { setError('Email and password required'); return; }
@@ -171,10 +170,7 @@ export default function LoginPage() {
             <span style={{ color: '#444', fontSize: '11px', letterSpacing: '1px' }}>OR</span>
             <div style={{ flex: 1, height: '1px', background: '#1e1e2e' }} />
           </div>
-          {googleReady
-            ? <GoogleLoginButton disabled={loading} setLoading={setLoading} setError={setError} />
-            : <button disabled style={{ width: '100%', padding: '13px', background: '#1a1a1a', border: 'none', borderRadius: '8px', color: '#444', fontFamily: 'inherit', fontSize: '13px', fontWeight: 700, letterSpacing: '1px', cursor: 'not-allowed' }}>CONTINUE WITH GOOGLE</button>
-          }
+          {googleClientId && <GoogleLoginButton disabled={loading} setLoading={setLoading} setError={setError} />}
         </div>
         <div style={{ textAlign: 'center', marginTop: '20px', color: '#333', fontSize: '12px' }}>
           HyperMindZ Assignment — NL-to-SQL System

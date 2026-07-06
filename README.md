@@ -85,7 +85,7 @@ GROQ_API_KEY=your-groq-api-key-here
 
 ```
 NEXT_PUBLIC_API_URL=https://hyper-mindz-solution-1.onrender.com
-NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-oauth-client-id
+GOOGLE_CLIENT_ID=your-google-oauth-client-id
 ```
 
 See `backend/.env.example` for reference.
@@ -185,4 +185,4 @@ Note: Render free tier has cold-start delays of ~50 seconds after inactivity.
 
 Environment variables to set in Vercel dashboard:
 - `NEXT_PUBLIC_API_URL` — your Render backend URL
-- `NEXT_PUBLIC_GOOGLE_CLIENT_ID` — from Google Cloud Console (OAuth 2.0 Client ID)
+- `GOOGLE_CLIENT_ID` — from Google Cloud Console (OAuth 2.0 Client ID)
