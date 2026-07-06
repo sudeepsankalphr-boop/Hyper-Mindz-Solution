@@ -177,14 +177,6 @@ The NL-to-SQL pipeline itself (schema introspection, prompt design, SQL generati
 
 ---
 
-## What I'd Improve With More Time
-
-1. **Conversation context** — follow-up questions referencing previous results
-2. **Data profiling on upload** — auto-generate summary stats when a CSV is uploaded
-3. **Tests** — unit tests for SQL validator, auth, and per-user isolation
-
----
-
 ## Deployment
 
 ### Render (Backend)
