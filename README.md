@@ -177,6 +177,21 @@ The NL-to-SQL pipeline itself (schema introspection, prompt design, SQL generati
 
 ---
 
+## Installing as an App (PWA)
+
+The app is a Progressive Web App — it can be installed on any device and runs like a native app with no browser chrome.
+
+| Platform | How to install |
+|---|---|
+| **Android (Chrome)** | Tap the "Add to Home Screen" banner or the install icon in the address bar |
+| **iOS (Safari)** | Tap Share → "Add to Home Screen" |
+| **Desktop Chrome / Edge** | Click the install icon in the right side of the address bar |
+| **Desktop Firefox** | Not supported — use as a normal website |
+
+Once installed, the app opens standalone (no browser UI) and appears in your app launcher like any other app.
+
+---
+
 ## Deployment
 
 ### Render (Backend)
