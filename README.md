@@ -3,8 +3,8 @@
 Ask natural language questions against your CSV data. Get accurate answers, charts, and the generated SQL — no technical knowledge required.
 
 **Live App:** https://hyper-mindz-solution.vercel.app  
-**Backend:** https://hyper-mindz-solution-production.up.railway.app  
-**Stack:** FastAPI · SQLite (in-memory) · Groq llama-3.3-70b · Next.js · Recharts
+**Backend:** https://hyper-mindz-solution-1.onrender.com  
+**Stack:** FastAPI · SQLite (in-memory) · Groq llama-3.3-70b · Next.js · Recharts · Google OAuth
 
 ---
 
@@ -84,7 +84,8 @@ GROQ_API_KEY=your-groq-api-key-here
 ### Frontend (`frontend/.env.local`)
 
 ```
-NEXT_PUBLIC_API_URL=https://hyper-mindz-solution-production.up.railway.app
+NEXT_PUBLIC_API_URL=https://hyper-mindz-solution-1.onrender.com
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-oauth-client-id
 ```
 
 See `backend/.env.example` for reference.
@@ -98,9 +99,9 @@ User Browser (Next.js on Vercel)
         │
         │  REST API (JWT auth)
         ▼
-FastAPI Backend (Railway)
+FastAPI Backend (Render)
         │
-        ├── Auth: bcrypt passwords, JWT tokens
+        ├── Auth: bcrypt passwords, JWT tokens, Google OAuth
         ├── Files: CSV upload → stored in SQLite (per user)
         ├── Query Pipeline:
         │     1. Load user's CSV into in-memory SQLite
@@ -157,33 +158,31 @@ Built using Claude (architecture decisions, code generation, debugging) and Curs
 |---|---|
 | In-memory SQLite per query | Safe and simple, but re-parses CSV every query — slow on large files |
 | JWT in localStorage | Simple to implement; susceptible to XSS. HttpOnly cookies would be safer |
-| Single LLM call per query | No retry on bad SQL; occasional hallucinated column names on complex questions |
+| Single LLM call per query | No self-correction on bad SQL; occasional hallucinated column names on complex questions |
 | No streaming | Full response wait; streaming would improve perceived latency |
 
 ---
 
 ## What I'd Improve With More Time
 
-1. **Read-only SQLite connection** (`PRAGMA query_only = ON`) as a second safety layer
-2. **Groq retry with backoff** on rate limits
-3. **Conversation context** — follow-up questions referencing previous results
-4. **Data profiling on upload** — auto-generate summary stats
-5. **Disable `/docs` in production** — FastAPI's Swagger UI is currently public
-6. **Tests** — unit tests for SQL validator, auth, and per-user isolation
+1. **Conversation context** — follow-up questions referencing previous results
+2. **Data profiling on upload** — auto-generate summary stats when a CSV is uploaded
+3. **Tests** — unit tests for SQL validator, auth, and per-user isolation
 
 ---
 
 ## Deployment
 
-### Railway (Backend)
+### Render (Backend)
 
-Environment variables to set in Railway dashboard:
-- `JWT_SECRET` — strong random string (not the default)
+Environment variables to set in Render dashboard:
+- `JWT_SECRET` — strong random string
 - `GROQ_API_KEY` — from console.groq.com
+
+Note: Render free tier has cold-start delays of ~50 seconds after inactivity.
 
 ### Vercel (Frontend)
 
-Environment variable to set in Vercel dashboard:
-- `NEXT_PUBLIC_API_URL` — your Railway backend URL
-
-Note: Railway free tier has cold-start delays of 30–60 seconds after inactivity.
+Environment variables to set in Vercel dashboard:
+- `NEXT_PUBLIC_API_URL` — your Render backend URL
+- `NEXT_PUBLIC_GOOGLE_CLIENT_ID` — from Google Cloud Console (OAuth 2.0 Client ID)

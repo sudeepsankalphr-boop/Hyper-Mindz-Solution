@@ -2,8 +2,34 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { API } from '@/lib/api';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://hyper-mindz-solution-production.up.railway.app';
+interface FileInfo {
+  file_id: string;
+  filename: string;
+  rows: number;
+  columns?: string[];
+}
+
+interface QueryResultData {
+  columns: string[];
+  rows: Record<string, string | number | null>[];
+  count: number;
+}
+
+interface QueryResult {
+  question: string;
+  sql: string;
+  row_count: number;
+  data: QueryResultData;
+}
+
+interface HistoryEntry {
+  question: string;
+  sql: string;
+  rows: number;
+}
+
 const COLORS = ['#00d4aa', '#0066ff', '#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff'];
 
 function getToken() { return localStorage.getItem('token'); }
@@ -12,15 +38,15 @@ function authHeaders() { return { 'Authorization': `Bearer ${getToken()}`, 'Cont
 export default function Dashboard() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [files, setFiles] = useState<any[]>([]);
-  const [selectedFile, setSelectedFile] = useState<any>(null);
+  const [files, setFiles] = useState<FileInfo[]>([]);
+  const [selectedFile, setSelectedFile] = useState<FileInfo | null>(null);
   const [question, setQuestion] = useState('');
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<QueryResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [chartType, setChartType] = useState<'table' | 'bar' | 'line' | 'pie'>('table');
-  const [history, setHistory] = useState<any[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -47,7 +73,7 @@ export default function Dashboard() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Upload failed');
       await loadFiles();
-    } catch (err: any) { setError(err.message); }
+    } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Upload failed'); }
     finally { setUploading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
   };
 
@@ -59,7 +85,7 @@ export default function Dashboard() {
     } catch { setError('Delete failed'); }
   };
 
-  const handleSelectFile = async (file: any) => {
+  const handleSelectFile = async (file: FileInfo) => {
     try {
       const res = await fetch(`${API}/files/${file.file_id}`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
       const data = await res.json();
@@ -76,7 +102,7 @@ export default function Dashboard() {
       if (!res.ok) throw new Error(data.detail || 'Query failed');
       setResult(data); setChartType('table');
       setHistory(prev => [{ question, sql: data.sql, rows: data.data?.count }, ...prev.slice(0, 9)]);
-    } catch (err: any) { setError(err.message); }
+    } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Query failed'); }
     finally { setLoading(false); }
   };
 
@@ -85,7 +111,7 @@ export default function Dashboard() {
   const handleExport = () => {
     if (!result?.data?.rows) return;
     const cols = result.data.columns;
-    const csv = [cols.join(','), ...result.data.rows.map((r: any) => cols.map((c: string) => `"${r[c] ?? ''}"`).join(','))].join('\n');
+    const csv = [cols.join(','), ...result.data.rows.map((r) => cols.map((c: string) => `"${r[c] ?? ''}"`).join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = 'results.csv'; a.click();
@@ -129,7 +155,7 @@ export default function Dashboard() {
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '12px' }}>
             {files.length === 0 && <div style={{ color: '#333', fontSize: '12px', textAlign: 'center', marginTop: '20px' }}>No files yet. Upload a CSV to start.</div>}
-            {files.map((f: any) => (
+            {files.map((f) => (
               <div key={f.file_id} onClick={() => handleSelectFile(f)} style={{ padding: '12px', borderRadius: '8px', marginBottom: '8px', cursor: 'pointer', background: selectedFile?.file_id === f.file_id ? 'rgba(0,212,170,0.1)' : '#0a0a0f', border: `1px solid ${selectedFile?.file_id === f.file_id ? 'rgba(0,212,170,0.3)' : '#1e1e2e'}` }}>
                 <div style={{ color: '#fff', fontSize: '13px', marginBottom: '4px', wordBreak: 'break-all' }}>{f.filename}</div>
                 <div style={{ color: '#444', fontSize: '11px' }}>{f.rows?.toLocaleString()} rows</div>
@@ -203,7 +229,7 @@ export default function Dashboard() {
                       <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                           <thead><tr>{result.data.columns.map((col: string) => <th key={col} style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid #1e1e2e', color: '#00d4aa', fontSize: '11px', letterSpacing: '1px', whiteSpace: 'nowrap' }}>{col.toUpperCase()}</th>)}</tr></thead>
-                          <tbody>{result.data.rows.map((row: any, i: number) => <tr key={i} style={{ borderBottom: '1px solid #0f0f1a' }}>{result.data.columns.map((col: string) => <td key={col} style={{ padding: '8px 12px', color: '#ccc', whiteSpace: 'nowrap' }}>{row[col] ?? '—'}</td>)}</tr>)}</tbody>
+                          <tbody>{result.data.rows.map((row, i: number) => <tr key={i} style={{ borderBottom: '1px solid #0f0f1a' }}>{result.data.columns.map((col: string) => <td key={col} style={{ padding: '8px 12px', color: '#ccc', whiteSpace: 'nowrap' }}>{row[col] ?? '—'}</td>)}</tr>)}</tbody>
                         </table>
                       </div>
                     )}
@@ -235,7 +261,7 @@ export default function Dashboard() {
                       <ResponsiveContainer width="100%" height={300}>
                         <PieChart>
                           <Pie data={chartData} dataKey={result.data.columns[1] || result.data.columns[0]} nameKey={result.data.columns[0]} cx="50%" cy="50%" outerRadius={100} label>
-                            {chartData.map((_: any, i: number) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                            {chartData.map((_, i: number) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                           </Pie>
                           <Tooltip contentStyle={{ background: '#111118', border: '1px solid #1e1e2e', borderRadius: '8px' }} />
                           <Legend />
