@@ -79,6 +79,7 @@ npm run dev
 ```
 JWT_SECRET=your-strong-random-secret-here
 GROQ_API_KEY=your-groq-api-key-here
+GATEWAY_URL=http://localhost:8000   # URL of agent-action-gateway; queries are blocked if unreachable
 ```
 
 ### Frontend (`frontend/.env.local`)
@@ -108,7 +109,8 @@ FastAPI Backend (Render)
         │     2. Extract schema + sample rows + column types
         │     3. Build schema-aware prompt → Groq llama-3.3-70b
         │     4. Validate generated SQL (SELECT-only allowlist)
-        │     5. Execute against in-memory DB → return results
+        │     5. Policy check via agent-action-gateway (fail-closed)
+        │     6. Execute against in-memory DB → return results
         └── Multi-tenant isolation: every query scoped by user_id
 ```
 
@@ -117,7 +119,8 @@ FastAPI Backend (Render)
 1. **Schema introspection** — column names and inferred types (REAL vs TEXT) extracted from CSV headers + first row
 2. **Prompt design** — schema, column types, and 3 sample rows injected into prompt; temperature=0 for deterministic output; window function examples included for per-group queries
 3. **Query validation** — SELECT-only allowlist; anything that isn't a read-only SELECT is rejected with a 400 before execution
-4. **In-memory execution** — CSV loaded into a fresh SQLite `:memory:` DB per query; no persistence, no cross-user data leakage possible
+4. **Policy gateway check** — validated SQL is submitted to [agent-action-gateway](https://github.com/sudeepsankalphr-boop/agent-action-gateway) (`POST /actions`) before execution. The gateway evaluates YAML-defined rules (e.g. DROP/TRUNCATE/ALTER → REJECTED, DELETE → NEEDS_APPROVAL) and returns a decision. If the gateway is unreachable, execution is blocked — never silently allowed. This demonstrates the gateway's design goal of integrating into an existing application without changing its core architecture.
+5. **In-memory execution** — CSV loaded into a fresh SQLite `:memory:` DB per query; no persistence, no cross-user data leakage possible
 5. **Result routing** — frontend decides chart vs table based on column count and data shape
 
 ### Why This Stack
