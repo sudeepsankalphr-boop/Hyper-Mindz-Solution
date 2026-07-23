@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from database import get_db
 from models import User, UploadedFile, QueryHistory
 from config import JWT_SECRET, ALGORITHM
+from gateway import check_with_gateway
 import jwt
 import os
 import json
@@ -232,6 +233,9 @@ def ask_question(
     is_valid, reason = validate_sql(generated_sql)
     if not is_valid:
         raise HTTPException(status_code=400, detail=f"Query not permitted: {reason}")
+
+    # Gateway policy check — fail closed if unreachable
+    check_with_gateway(generated_sql, target="data")
 
     # Execute
     try:
